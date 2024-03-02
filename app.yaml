@@ -1,0 +1,13 @@
+runtime: python311
+entrypoint: python app.py
+instance_class: F1
+
+handlers:
+  - url: /.*
+    script: auto
+
+  - url: /.*
+    static_files: /templates/
+    upload: /templates/
+    http_headers:
+      Content-Security-Policy: "default-src 'self'; img-src 'self' data: https://www.w3.org/; style-src 'self' https://fonts.googleapis.com/ 'unsafe-inline'; font-src https://fonts.gstatic.com/; script-src 'self' 'unsafe-inline'"

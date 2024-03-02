@@ -1,0 +1,9 @@
+Flask
+Flask-Cors
+Flask-Limiter
+Flask-Talisman
+google-cloud-secret-manager
+google-cloud-firestore
+emoji
+validators
+beautifulsoup4
