@@ -56,6 +56,14 @@ limiter = Limiter(
 )
 talisman = Talisman(app, content_security_policy=CSP)
 
+# Fetch Google API key for Safe Browsing
+client = secretmanager.SecretManagerServiceClient()
+project_id = "358507212056"
+name = f"projects/{project_id}/secrets/google_safe_browsing/versions/latest"
+GOOGLE_API_KEY = client.access_secret_version(
+    request={"name": name}
+).payload.data.decode("UTF-8")
+
 # Define a dictionary of valid API keys
 client = secretmanager.SecretManagerServiceClient()
 project_id = "358507212056"
@@ -268,7 +276,7 @@ def redirect_to_url(url_id):
     # return redirect(url)
     title = get_page_title(url)
 
-    if check_google_safe_browsing(url, "AIzaSyBILqNW6BD2g9B_XNyUrKfsqvjuNN7fv_A"):
+    if check_google_safe_browsing(url, GOOGLE_API_KEY):
         return render_template("warning.html", url=url, title=title)
     else:
         return render_template("index.html", url=url, title=title)
