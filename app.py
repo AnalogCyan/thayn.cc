@@ -220,9 +220,7 @@ def index():
 # Route for privacy policy
 @app.route("/privacy", methods=["GET"])
 def privacy():
-    with open("static/PRIVACY.md", "r", encoding="utf-8") as file:
-        page = file.read()
-    return render_template("privacy.html", privacy=page)
+    return redirect("https://github.com/AnalogCyan/thayn.cc/blob/main/PRIVACY.md")
 
 
 # Route for generating a new shortened URL
