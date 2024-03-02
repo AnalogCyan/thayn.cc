@@ -10,6 +10,6 @@ If you wish to contribute to this project, feel free to submit pull requests. Yo
 
 ## Privacy Policy
 
-For information regarding the project's privacy policy, please refer to the [Privacy Policy](/static/PRIVACY.md) document.
+For information regarding the project's privacy policy, please refer to the [Privacy Policy](/PRIVACY.md) document.
 
 Created with 💖 by Cyan.
