@@ -1,14 +1,39 @@
+"""
+This script defines a Flask application that provides URL shortening functionality.
+It uses Google Cloud Firestore as the database for storing the shortened URLs.
+The application also includes various utility functions for checking API keys, 
+checking URLs against Google Safe Browsing API, retrieving page titles, and generating 
+new emoji string IDs for shortened URLs.
+
+The main routes of the application include:
+- GET /: Returns the index.html file from the "static" directory.
+- GET /privacy: Redirects the user to the privacy policy page.
+- POST /: Shortens a given URL and returns a shortened URL.
+- GET /<url_id>: Redirects to the specified URL based on the given URL ID.
+
+The application uses various external libraries such as Flask, BeautifulSoup, 
+requests, emoji, and Google Cloud libraries for Secret Manager and Firestore.
+
+Note: This script requires proper configuration of Google Cloud services and 
+API keys for Google Safe Browsing and Secret Manager.
+"""
+
 import itertools
 import os
-from functools import wraps
 import random
+from functools import wraps
 from urllib.parse import urlparse
-
 import emoji
-import google.cloud.firestore as firestore
 import requests
 import validators
 from bs4 import BeautifulSoup
+from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_talisman import Talisman
+from google.cloud import secretmanager
+
+from google.cloud import firestore
 from flask import (
     Flask,
     jsonify,
@@ -17,12 +42,6 @@ from flask import (
     request,
     send_from_directory,
 )
-from flask_cors import CORS
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
-from flask_talisman import Talisman
-from google.cloud.firestore import Increment
-from google.cloud import secretmanager
 
 
 app = Flask(__name__)
@@ -59,19 +78,19 @@ talisman = Talisman(app, content_security_policy=CSP)
 
 # Fetch Google API key for Safe Browsing
 client = secretmanager.SecretManagerServiceClient()
-project_id = "358507212056"
-name = f"projects/{project_id}/secrets/google_safe_browsing/versions/latest"
+PROJECT_ID = "358507212056"
+name = f"projects/{PROJECT_ID}/secrets/google_safe_browsing/versions/latest"
 GOOGLE_API_KEY = client.access_secret_version(
     request={"name": name}
 ).payload.data.decode("UTF-8")
 
 # Define a dictionary of valid API keys
 client = secretmanager.SecretManagerServiceClient()
-project_id = "358507212056"
+PROJECT_ID = "358507212056"
 secrets = ["Cyan", "Meghan"]
 valid_api_keys = {}
 for secret_id in secrets:
-    name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
+    name = f"projects/{PROJECT_ID}/secrets/{secret_id}/versions/latest"
     response = client.access_secret_version(request={"name": name})
     valid_api_keys[response.payload.data.decode("UTF-8")] = secret_id
 
@@ -134,36 +153,58 @@ emojis = [
     ":thought_balloon:",
     ":zzz:",
 ]
-for i in range(len(emojis)):
-    emojis[i] = emoji.emojize(emojis[i])
+for i, emoji_name in enumerate(emojis):
+    emojis[i] = emoji.emojize(emoji_name)
 
 # Initialize Firestore
 db = firestore.Client()
 urls_ref = db.collection("urls")
 
 
-# Function to require a valid API key
 def check_api_key(func):
+    """
+    Decorator function to check the validity of an API key.
+
+    This function is used as a decorator to wrap around other route functions.
+    It checks if the 'X-API-Key' header from the request is valid.
+    If the API key is valid, the route function is executed.
+    If the API key is invalid, an error response is returned.
+
+    Args:
+        func (function): The route function to be decorated.
+
+    Returns:
+        function: The decorated function.
+
+    """
+
     @wraps(func)
     def decorated_function(*args, **kwargs):
-        # Access the 'X-API-Key' header from the request
         api_key = request.headers.get("X-API-Key")
 
-        # Check if the API key is valid
         if api_key in valid_api_keys:
-            # API key is valid, proceed with the route function
             return func(*args, **kwargs)
-        else:
-            # API key is invalid, return error response
-            error_message = {"error": "Invalid API key"}
-            return jsonify(error_message), 401
+        error_message = {"error": "Invalid API key"}
+        return jsonify(error_message), 401
 
     return decorated_function
 
 
-# Function to check if a URL is safe using Google Safe Browsing
 def check_google_safe_browsing(url, google_api_key):
-    safe_browsing_url = f"https://safebrowsing.googleapis.com/v4/threatMatches:find?key={google_api_key}"
+    """
+    Checks if a given URL is flagged as a threat by Google Safe Browsing API.
+
+    Args:
+        url (str): The URL to be checked.
+        google_api_key (str): The API key for accessing Google Safe Browsing API.
+
+    Returns:
+        bool: True if the URL is flagged as a threat, False otherwise.
+    """
+    safe_browsing_url = (
+        "https://safebrowsing.googleapis.com/v4/threatMatches:find?key="
+        f"{google_api_key}"
+    )
     payload = {
         "client": {
             "clientId": "thayn-cc",
@@ -176,25 +217,43 @@ def check_google_safe_browsing(url, google_api_key):
             "threatEntries": [{"url": url}],
         },
     }
-    response = requests.post(safe_browsing_url, json=payload)
+    safe_browsing_response = requests.post(safe_browsing_url, json=payload, timeout=15)
 
-    if response.json():
-        return True
-    else:
-        return False
+    return bool(safe_browsing_response.json())
 
 
-# Function to get the title of a webpage
 def get_page_title(url):
+    """
+    Retrieves the title of a web page.
+
+    Args:
+        url (str): The URL of the web page.
+
+    Returns:
+        str: The title of the web page if found, otherwise "No Title Found".
+
+    Raises:
+        requests.exceptions.RequestException: If there is an error reaching the URL.
+    """
     try:
-        response = requests.get(url)
-        soup = BeautifulSoup(response.text, "html.parser")
+        page_response = requests.get(url, timeout=15)
+        soup = BeautifulSoup(page_response.text, "html.parser")
         return soup.title.string if soup.title else "No Title Found"
-    except requests.exceptions.RequestException as e:
+    except requests.exceptions.RequestException:
         return "Error: Unable to reach URL."
 
 
 def int_to_base(n, base):
+    """
+    Converts an integer to a list of digits in the specified base.
+
+    Parameters:
+    - n (int): The integer to convert.
+    - base (int): The base to convert the integer to.
+
+    Returns:
+    - list: A list of digits representing the integer in the specified base.
+    """
     if n == 0:
         return [0]
     digits = []
@@ -205,10 +264,16 @@ def int_to_base(n, base):
 
 
 def get_next_emoji_string():
+    """
+    Generates a new emoji string ID by iterating through all possible combinations of emojis.
+
+    Returns:
+        str: The newly generated emoji string ID.
+    """
     ids_ref = db.collection("ids")
     random.shuffle(emojis)
-    for i in range(1, len(emojis)):
-        for sequence in itertools.product(emojis, repeat=i):
+    for j in range(1, len(emojis)):
+        for sequence in itertools.product(emojis, repeat=j):
             sequence = "".join(sequence)
             doc_refs = ids_ref.where("id", "==", sequence).get()
             if not doc_refs:
@@ -216,22 +281,40 @@ def get_next_emoji_string():
                 return sequence
 
 
-# Route for landing page
 @app.route("/", methods=["GET"])
 def index():
+    """
+    Handles the root route ("/") and returns the index.html file from the "static" directory.
+
+    Returns:
+        The index.html file from the "static" directory.
+    """
     return send_from_directory("static", "index.html")
 
 
-# Route for privacy policy
 @app.route("/privacy", methods=["GET"])
 def privacy():
-    return redirect("https://github.com/AnalogCyan/thayn.cc/blob/main/PRIVACY.md")
+    """
+    Redirects the user to the privacy policy page.
+
+    Returns:
+        A redirect response to the privacy policy page.
+    """
+    return redirect("https://github.com/AnalogCyan/" + "thayn.cc/blob/main/PRIVACY.md")
 
 
-# Route for generating a new shortened URL
 @app.route("/", methods=["POST"])
 @check_api_key
 def shorten_url():
+    """
+    Shortens a given URL and returns a shortened URL.
+
+    Returns:
+        A dictionary containing the shortened URL.
+
+    Raises:
+        ValueError: If the URL is invalid.
+    """
     url = request.get_json().get("url")
     scheme = urlparse(url).scheme
     # Validate the URL
@@ -259,17 +342,22 @@ def shorten_url():
     return {"short_url": [host_url + id for id in url_id]}, 201
 
 
-# Route for routing the shortened URL
 @app.route("/<url_id>")
 def redirect_to_url(url_id):
+    """
+    Redirects to the specified URL based on the given URL ID.
+
+    Args:
+        url_id (str): The ID of the URL to redirect to.
+
+    Returns:
+        str: The rendered HTML template or an error message if the URL is not found.
+
+    """
     urls = urls_ref.where("id", "==", url_id).stream()
     url = next((url.to_dict()["url"] for url in urls), None)
     if not url:
         return "URL not found", 404
-    else:
-        scheme = urlparse(url).scheme
-        if scheme != "https":
-            url = url.replace(scheme, "https")
     # return redirect(url)
     title = get_page_title(url)
 
