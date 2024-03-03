@@ -1,6 +1,7 @@
 import itertools
 import os
 from functools import wraps
+import random
 from urllib.parse import urlparse
 
 import emoji
@@ -139,7 +140,6 @@ for i in range(len(emojis)):
 # Initialize Firestore
 db = firestore.Client()
 urls_ref = db.collection("urls")
-counter_ref = db.collection("counter").document("emoji_counter")
 
 
 # Function to require a valid API key
@@ -205,18 +205,15 @@ def int_to_base(n, base):
 
 
 def get_next_emoji_string():
-    counter_doc = counter_ref.get()
-    counter_value = counter_doc.to_dict()["value"]
-
-    base = len(emojis)
-    print(f"counter_value: {counter_value}, base: {base}")
-    number_in_base = int_to_base(counter_value, base)
-    sequence = "".join([emojis[i] for i in number_in_base])
-
-    # Update the counter
-    counter_ref.update({"value": Increment(1)})
-
-    return sequence
+    ids_ref = db.collection("ids")
+    random.shuffle(emojis)
+    for i in range(1, len(emojis)):
+        for sequence in itertools.product(emojis, repeat=i):
+            sequence = "".join(sequence)
+            doc_refs = ids_ref.where("id", "==", sequence).get()
+            if not doc_refs:
+                print(f"New ID: {sequence}")
+                return sequence
 
 
 # Route for landing page
