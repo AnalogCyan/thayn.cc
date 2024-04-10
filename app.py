@@ -171,7 +171,8 @@ for i, emoji_name in enumerate(emojis):
     emojis[i] = emoji.emojize(emoji_name)
 
 # Initialize Firestore
-db = firestore.Client()
+DATABASE_ID = "thayn-cc"
+db = firestore.Client(project=PROJECT_ID, database=DATABASE_ID)
 urls_ref = db.collection("urls")
 
 
@@ -277,22 +278,32 @@ def int_to_base(n, base):
     return digits[::-1]
 
 
-def get_next_emoji_string():
+def get_next_emoji_string(min_length=1):
     """
     Generates a new emoji string ID by iterating through all possible combinations of emojis.
 
+    Args:
+        min_length (int, optional): The minimum length of the emoji string. Defaults to 1.
+
     Returns:
         str: The newly generated emoji string ID.
+
+    Raises:
+        ValueError: If all possible emoji combinations have been used.
     """
-    ids_ref = db.collection("ids")
-    random.shuffle(emojis)
-    for j in range(1, len(emojis)):
-        for sequence in itertools.product(emojis, repeat=j):
-            sequence = "".join(sequence)
-            doc_refs = ids_ref.where("id", "==", sequence).get()
-            if not doc_refs:
-                print(f"New ID: {sequence}")
-                return sequence
+    ids_collection_reference = db.collection("ids")
+    used_strings = [
+        doc.to_dict().get("id") for doc in ids_collection_reference.stream()
+    ]
+    max_length = len(emojis)
+    while min_length <= max_length:
+        for combo in itertools.permutations(emojis, min_length):
+            emoji_string = "".join(combo)
+            if emoji_string not in used_strings:
+                print(f"New ID: {emoji_string}")
+                return emoji_string
+        min_length += 1
+    raise ValueError("All possible emoji combinations have been used.")
 
 
 @app.route("/", methods=["GET"])
